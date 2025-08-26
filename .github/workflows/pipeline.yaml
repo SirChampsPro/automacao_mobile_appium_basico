@@ -9,10 +9,6 @@ jobs:
   android-appium-tests:
     runs-on: ubuntu-latest
 
-    env:
-      ANDROID_HOME: /home/runner/android-sdk
-      PATH: /home/runner/android-sdk/cmdline-tools/latest/bin:/home/runner/android-sdk/platform-tools:/home/runner/android-sdk/emulator:$PATH
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -20,33 +16,20 @@ jobs:
       - name: Set up Java 11
         uses: actions/setup-java@v3
         with:
-          java-version: '11'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: 11
 
-      - name: Install Maven and dependencies
-        run: sudo apt-get update && sudo apt-get install -y maven unzip wget
-
-      - name: Install Android SDK command line tools
-        run: |
-          mkdir -p $ANDROID_HOME/cmdline-tools
-          cd $ANDROID_HOME/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip cmdline-tools.zip
-          mv cmdline-tools latest
-          rm cmdline-tools.zip
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-
-      - name: Install required Android packages
-        run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "emulator" "platforms;android-33" "system-images;android-33;google_apis;x86_64"
-
-      - name: Create and start Android emulator
-        run: |
-          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n test -k "system-images;android-33;google_apis;x86_64" --force
-          $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio -gpu swiftshader_indirect &
-          adb wait-for-device
-          adb shell input keyevent 82
-        shell: bash
+      - name: Run Android Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: true
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect
+          emulator-boot-timeout: 600
+          disable-animations: true
+          enable-hw-keyboard: false
 
       - name: Build and run Appium tests
         run: mvn clean test -f appium-tests/pom.xml
