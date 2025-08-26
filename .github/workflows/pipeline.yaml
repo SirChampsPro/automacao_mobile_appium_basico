@@ -1,4 +1,4 @@
-name: Mobile Automation Tests Appium
+name: Mobile Automation Appium
 
 on:
   push:
@@ -17,18 +17,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install basic tools
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y tar unzip curl wget
+          sudo apt-get install -y tar unzip curl git maven openjdk-11-jdk
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: temurin
-          java-version: 11
-
-      - name: Install Android SDK command line tools
+      - name: Setup Android SDK
         run: |
           mkdir -p $ANDROID_HOME/cmdline-tools
           cd $ANDROID_HOME/cmdline-tools
@@ -46,11 +40,17 @@ jobs:
       - name: Start Emulator
         run: |
           $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio -gpu swiftshader_indirect &
-          adb wait-for-device
+          # Wait for emulator to be fully booted
+          boot_completed=""
+          echo "Waiting for emulator to boot..."
+          until [[ "$boot_completed" =~ "1" ]]; do
+            sleep 10
+            boot_completed=$(adb -e shell getprop sys.boot_completed 2>/dev/null || echo "")
+          done
           adb shell input keyevent 82
         shell: bash
 
-      - name: Build and Run Appium Tests
+      - name: Run Appium Tests
         run: mvn clean test
         working-directory: ./appium-tests
         shell: bash
@@ -65,3 +65,20 @@ jobs:
         with:
           name: appium-reports
           path: appium-tests/target/surefire-reports
+
+      - name: Generate GitHub Actions Summary
+        if: always()
+        run: |
+          REPORT_JSON="appium-tests/target/surefire-reports/*.xml"
+          if compgen -G "$REPORT_JSON" > /dev/null; then
+            echo "### Appium Tests Summary" >> $GITHUB_STEP_SUMMARY
+            for file in $REPORT_JSON; do
+              TESTS=$(xmllint --xpath "count(//testcase)" $file)
+              FAILS=$(xmllint --xpath "count(//testcase[failure])" $file)
+              SKIPPED=$(xmllint --xpath "count(//testcase[skipped])" $file)
+              echo "- $file: $TESTS tests, $FAILS failed, $SKIPPED skipped" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "No test reports found." >> $GITHUB_STEP_SUMMARY
+          fi
+        shell: bash
