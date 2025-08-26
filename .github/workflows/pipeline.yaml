@@ -1,7 +1,9 @@
-name: Appium Mobile Tests
+name: Android Appium Tests
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -12,50 +14,34 @@ jobs:
       PATH: /usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/tools:/usr/local/lib/android/sdk/tools/bin:/usr/local/lib/android/sdk/platform-tools:$PATH
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y openjdk-11-jdk maven wget unzip tar lib32stdc++6 lib32z1 qemu-kvm
+          sudo apt-get install -y tar unzip openjdk-11-jdk maven
 
-      - name: Verify Java version
-        run: java -version
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Install Android SDK
-        run: |
-          mkdir -p $ANDROID_HOME
-          cd $ANDROID_HOME
-          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip cmdline-tools.zip
-          mkdir -p cmdline-tools/latest
-          mv cmdline-tools/* cmdline-tools/latest/
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "emulator" "system-images;android-33;google_apis;x86_64"
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
 
-      - name: Create Android Emulator
-        run: |
-          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n test_avd -k "system-images;android-33;google_apis;x86_64" --force
-          $ANDROID_HOME/emulator/emulator -list-avds
-
-      - name: Start Android Emulator
-        run: |
-          nohup $ANDROID_HOME/emulator/emulator -avd test_avd -no-snapshot -no-audio -no-window &
-          adb wait-for-device
-          adb shell input keyevent 82
+      - name: Build and resolve dependencies
+        run: mvn clean install -DskipTests
 
       - name: Start Appium server
         run: |
           npm install -g appium
-          nohup appium &
+          appium --session-override &
 
-      - name: Run Appium tests (Maven)
-        run: mvn clean test
+      - name: Run Appium tests
+        run: mvn test
 
-      - name: Upload test reports
-        if: always()
+      - name: Upload Test Reports
         uses: actions/upload-artifact@v4
         with:
           name: appium-report
-          path: target/surefire-reports
+          path: target/surefire-reports/
