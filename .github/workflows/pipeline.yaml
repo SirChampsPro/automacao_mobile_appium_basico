@@ -1,66 +1,86 @@
-name: Mobile Automation Appium
+name: Appium Mobile Tests
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
-  appium-tests:
+  android-appium-tests:
     runs-on: ubuntu-latest
 
     env:
-      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
-      PATH: $JAVA_HOME/bin:$PATH
+      ANDROID_HOME: ${{ runner.temp }}/android-sdk
+      PATH: ${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin:${{ runner.temp }}/android-sdk/platform-tools:${{ runner.temp }}/android-sdk/emulator:$PATH
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up JDK 11
+      - name: Set up Java 11
         uses: actions/setup-java@v3
         with:
-          distribution: 'temurin'
           java-version: '11'
+          distribution: 'temurin'
 
       - name: Install Maven
-        run: sudo apt-get update && sudo apt-get install -y maven
+        run: sudo apt-get update && sudo apt-get install -y maven unzip wget
 
-      - name: Setup Android Emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 33
-          target: google_apis
-          arch: x86_64
-          force-avd-creation: true
-          emulator-options: -no-window -no-audio -gpu swiftshader_indirect
-          cores: 2
-          avd-name: test
-          emulator-boot-timeout: 600
-          disable-animations: true
+      - name: Install Android SDK command line tools
+        run: |
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          cd $ANDROID_HOME/cmdline-tools
+          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+          unzip cmdline-tools.zip
+          mv cmdline-tools latest
+          rm cmdline-tools.zip
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
 
-      - name: Run Appium Tests
-        run: mvn clean test
-        working-directory: ./appium-tests
+      - name: Install required Android packages
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "emulator" "platforms;android-33" "system-images;android-33;google_apis;x86_64"
+          echo "ANDROID_HOME set to $ANDROID_HOME"
 
-      - name: Upload Test Reports
-        if: always()
+      - name: Create and start Android emulator
+        run: |
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n test -k "system-images;android-33;google_apis;x86_64" --force
+          $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio -gpu swiftshader_indirect &
+          adb wait-for-device
+          adb shell input keyevent 82
+        shell: bash
+
+      - name: Build and run Appium tests
+        run: mvn clean test -f appium-tests/pom.xml
+
+      - name: Upload test reports
         uses: actions/upload-artifact@v4
         with:
           name: appium-reports
           path: appium-tests/target/surefire-reports
 
-      - name: Generate GitHub Actions Summary
+      - name: Generate GitHub Actions summary
         if: always()
-        run: |
-          REPORT_XML="appium-tests/target/surefire-reports/*.xml"
-          if compgen -G "$REPORT_XML" > /dev/null; then
-            echo "### Appium Tests Summary" >> $GITHUB_STEP_SUMMARY
-            for file in $REPORT_XML; do
-              TESTS=$(xmllint --xpath "count(//testcase)" $file)
-              FAILS=$(xmllint --xpath "count(//testcase[failure])" $file)
-              SKIPPED=$(xmllint --xpath "count(//testcase[skipped])" $file)
-              echo "- $file: $TESTS tests, $FAILS failed, $SKIPPED skipped" >> $GITHUB_STEP_SUMMARY
-            done
-          else
-            echo "No test reports found." >> $GITHUB_STEP_SUMMARY
-        shell: bash
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'appium-tests/target/surefire-reports';
+            if (!fs.existsSync(reportPath)) {
+              console.log('Nenhum relatório encontrado, pulando summary.');
+              return;
+            }
+            const files = fs.readdirSync(reportPath).filter(f => f.endsWith('.xml'));
+            let summary = "### Appium Tests Summary\n\n| Test | Status |\n| --- | --- |\n";
+            files.forEach(file => {
+              const content = fs.readFileSync(`${reportPath}/${file}`, 'utf8');
+              const matches = content.match(/<testcase.*name="(.*?)".*status="(.*?)"/g);
+              if (matches) {
+                matches.forEach(m => {
+                  const name = m.match(/name="(.*?)"/)[1];
+                  const statusMatch = m.match(/status="(.*?)"/);
+                  const status = statusMatch ? statusMatch[1] : "passed";
+                  summary += `| ${name} | ${status} |\n`;
+                });
+              }
+            });
+            github.actions.summary.addRaw(summary).write();
