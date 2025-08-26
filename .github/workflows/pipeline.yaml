@@ -1,13 +1,12 @@
-name: Java Appium Tests
+name: Appium Mobile Tests
 
 on:
   push:
   pull_request:
 
 jobs:
-  appium-tests:
+  android-appium-tests:
     runs-on: ubuntu-latest
-
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       PATH: /usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/tools:/usr/local/lib/android/sdk/tools/bin:/usr/local/lib/android/sdk/platform-tools:$PATH
@@ -16,53 +15,47 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: temurin
-          java-version: 11
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openjdk-11-jdk maven wget unzip tar lib32stdc++6 lib32z1 qemu-kvm
+
+      - name: Verify Java version
+        run: java -version
 
       - name: Install Android SDK
-        uses: android-actions/setup-android@v2
-        with:
-          api-level: 33
-          target: default
-          arch: x86_64
-          build-tools: 33.0.2
+        run: |
+          mkdir -p $ANDROID_HOME
+          cd $ANDROID_HOME
+          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+          unzip cmdline-tools.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "emulator" "system-images;android-33;google_apis;x86_64"
 
-      - name: Accept Android licenses
-        run: yes | sdkmanager --licenses
+      - name: Create Android Emulator
+        run: |
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n test_avd -k "system-images;android-33;google_apis;x86_64" --force
+          $ANDROID_HOME/emulator/emulator -list-avds
 
       - name: Start Android Emulator
         run: |
-          echo "Starting emulator..."
-          $ANDROID_HOME/emulator/emulator -avd testAVD -no-window -no-audio &
+          nohup $ANDROID_HOME/emulator/emulator -avd test_avd -no-snapshot -no-audio -no-window &
           adb wait-for-device
           adb shell input keyevent 82
 
-      - name: Build project
-        run: ./gradlew clean build
+      - name: Start Appium server
+        run: |
+          npm install -g appium
+          nohup appium &
 
-      - name: Run Appium tests
-        run: ./gradlew connectedAndroidTest
+      - name: Run Appium tests (Maven)
+        run: mvn clean test
 
-      - name: Generate GitHub Actions summary
+      - name: Upload test reports
         if: always()
-        uses: actions/github-script@v6
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const fs = require('fs');
-            const reportPath = 'app/build/reports/tests/testDebugUnitTest/testDebugUnitTest.json';
-            if (!fs.existsSync(reportPath)) {
-              console.log('Nenhum report encontrado, pulando summary.');
-              return;
-            }
-            const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-            let summary = `### Appium Tests Summary\n\n`;
-            summary += `| Test | Status |\n| --- | --- |\n`;
-            report.testsuites.testsuite.forEach(suite => {
-              suite.testcase.forEach(tc => {
-                summary += `| ${tc.name} | ${tc.status || 'unknown'} |\n`;
-              });
-            });
-            github.actions.summary.addRaw(summary).write();
+          name: appium-report
+          path: target/surefire-reports
