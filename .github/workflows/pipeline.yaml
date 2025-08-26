@@ -9,84 +9,68 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Pega o código
       - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
-          clean: true
 
-      - name: Set up Java
+      # 2. Configura Java 11
+      - name: Set up Java 11
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: 11
 
-      - name: Install Android SDK and platform-tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip wget curl
-          mkdir -p $HOME/android-sdk/cmdline-tools
-          export ANDROID_HOME=$HOME/android-sdk
-          export PATH=$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+      # 3. Configura Android SDK e emulador
+      - name: Set up Android Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: true
+          emulator-options: "-no-window -no-audio -gpu swiftshader_indirect"
 
-          # Baixar e extrair o Command Line Tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
-          mkdir -p $ANDROID_HOME/cmdline-tools/latest
-          mv $ANDROID_HOME/cmdline-tools/cmdline-tools/* $ANDROID_HOME/cmdline-tools/latest/
-
-          # Aceitar licenças e instalar platform-tools
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-
-      - name: Verify installations
-        run: |
-          java -version
-          adb version
-          echo $ANDROID_HOME
-
+      # 4. Mostra informações do ambiente
       - name: Verify environment
         run: |
           java -version
           adb version
-          echo $ANDROID_HOME
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "PATH=$PATH"
 
-      - name: Build Maven project
-        run: mvn clean install
+      # 5. Roda os testes Maven / Appium
+      - name: Run Appium Tests
+        run: mvn clean test
 
-      - name: Run Appium tests
-        run: mvn test
-
+      # 6. Gera resumo do Maven Surefire / JUnit em Markdown
       - name: Generate GitHub Actions summary
         if: always()
         uses: actions/github-script@v6
         with:
           script: |
             const fs = require('fs');
-            const path = 'target/surefire-reports/testng-results.xml';
-            if (!fs.existsSync(path)) {
-              console.log('Nenhum report encontrado, pulando summary.');
+            const surefirePath = 'target/surefire-reports';
+            if (!fs.existsSync(surefirePath)) {
+              console.log('Nenhum relatório encontrado, pulando summary.');
               return;
             }
-            const parseString = require('xml2js').parseString;
-            const xml = fs.readFileSync(path, 'utf8');
-            parseString(xml, (err, result) => {
-              if (err) {
-                console.error('Erro ao ler XML', err);
-                return;
-              }
-              let summary = `### Appium Tests Summary\n\n`;
-              summary += `| Test | Status |\n| --- | --- |\n`;
-              const suites = result.testng.testsuite;
-              suites.forEach(suite => {
-                suite.test.forEach(t => {
-                  t.class.forEach(c => {
-                    c.test.forEach(tc => {
-                      summary += `| ${tc.$.name} | ${tc.$.status} |\n`;
-                    });
-                  });
+
+            const xml2js = require('xml2js');
+            const parser = new xml2js.Parser();
+            let summary = '### Appium Test Summary\n\n| Test | Status |\n| --- | --- |\n';
+
+            const files = fs.readdirSync(surefirePath).filter(f => f.endsWith('.xml'));
+            for (const file of files) {
+              const content = fs.readFileSync(`${surefirePath}/${file}`, 'utf8');
+              parser.parseString(content, (err, result) => {
+                if (err) return;
+                const tests = result.testsuite.testcase || [];
+                tests.forEach(t => {
+                  const name = t.$.name;
+                  const status = t.failure ? 'FAILED' : 'PASSED';
+                  summary += `| ${name} | ${status} |\n`;
                 });
               });
-              github.actions.summary.addRaw(summary).write();
-            });
+            }
+
+            github.actions.summary.addRaw(summary).write();
