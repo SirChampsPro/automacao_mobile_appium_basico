@@ -19,6 +19,12 @@ jobs:
           distribution: temurin
           java-version: 11
 
+      - name: Install Node.js and Appium
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm install -g appium
+
       - name: Run Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -31,7 +37,12 @@ jobs:
           disable-animations: true
           enable-hw-keyboard: false
 
-      - name: Build and run Appium tests
+      - name: Wait for emulator to boot
+        run: |
+          adb wait-for-device
+          adb shell input keyevent 82
+
+      - name: Run Appium tests
         run: mvn clean test -f appium-tests/pom.xml
 
       - name: Upload test reports
@@ -46,21 +57,21 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const reportPath = 'appium-tests/target/surefire-reports';
-            if (!fs.existsSync(reportPath)) {
+            const path = 'appium-tests/target/surefire-reports';
+            if (!fs.existsSync(path)) {
               console.log('Nenhum relatório encontrado, pulando summary.');
               return;
             }
-            const files = fs.readdirSync(reportPath).filter(f => f.endsWith('.xml'));
+            const files = fs.readdirSync(path).filter(f => f.endsWith('.xml'));
             let summary = "### Appium Tests Summary\n\n| Test | Status |\n| --- | --- |\n";
             files.forEach(file => {
-              const content = fs.readFileSync(`${reportPath}/${file}`, 'utf8');
-              const matches = content.match(/<testcase.*name="(.*?)".*status="(.*?)"/g);
-              if (matches) {
-                matches.forEach(m => {
-                  const name = m.match(/name="(.*?)"/)[1];
-                  const statusMatch = m.match(/status="(.*?)"/);
-                  const status = statusMatch ? statusMatch[1] : "passed";
+              const content = fs.readFileSync(`${path}/${file}`, 'utf8');
+              const testcaseMatches = content.match(/<testcase.*name="(.*?)"/g);
+              if (testcaseMatches) {
+                testcaseMatches.forEach(tc => {
+                  const nameMatch = tc.match(/name="(.*?)"/);
+                  const name = nameMatch ? nameMatch[1] : 'unknown';
+                  const status = tc.includes('<failure') ? 'failed' : 'passed';
                   summary += `| ${name} | ${status} |\n`;
                 });
               }
