@@ -40,7 +40,6 @@ jobs:
       - name: Start Emulator
         run: |
           $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio -gpu swiftshader_indirect &
-          # Wait for emulator to be fully booted
           boot_completed=""
           echo "Waiting for emulator to boot..."
           until [[ "$boot_completed" =~ "1" ]]; do
@@ -80,5 +79,4 @@ jobs:
             done
           else
             echo "No test reports found." >> $GITHUB_STEP_SUMMARY
-          fi
         shell: bash
