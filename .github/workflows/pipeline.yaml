@@ -1,47 +1,72 @@
-name: Android Appium Tests
+name: Java + Appium Tests
 
 on:
   push:
-    branches:
-      - main
   pull_request:
 
 jobs:
-  android-appium-tests:
+  appium-tests:
     runs-on: ubuntu-latest
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       PATH: /usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/tools:/usr/local/lib/android/sdk/tools/bin:/usr/local/lib/android/sdk/platform-tools:$PATH
 
     steps:
-
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y tar unzip openjdk-11-jdk maven
+          sudo apt-get install -y unzip tar curl openjdk-11-jdk maven
 
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up JDK
+      - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
           java-version: '11'
 
-      - name: Build and resolve dependencies
-        run: mvn clean install -DskipTests
-
-      - name: Start Appium server
+      - name: Install Android SDK packages
         run: |
-          npm install -g appium
-          appium --session-override &
+          yes | sdkmanager --licenses
+          sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis;x86_64"
+
+      - name: Create Android emulator
+        run: |
+          echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-33;google_apis;x86_64" --force
+
+      - name: Start Android emulator
+        run: |
+          $ANDROID_HOME/emulator/emulator -avd test_emulator -no-window -no-audio -no-snapshot &
+          adb wait-for-device
+          adb shell input keyevent 82
 
       - name: Run Appium tests
-        run: mvn test
+        run: mvn clean test
 
-      - name: Upload Test Reports
-        uses: actions/upload-artifact@v4
+      - name: Generate GitHub Actions summary
+        if: always()
+        uses: actions/github-script@v6
         with:
-          name: appium-report
-          path: target/surefire-reports/
+          script: |
+            const fs = require('fs');
+            const path = 'target/surefire-reports/testng-results.xml';
+            if (!fs.existsSync(path)) {
+              console.log('Nenhum report XML encontrado, pulando summary.');
+              return;
+            }
+            const xml2js = require('xml2js');
+            const parser = new xml2js.Parser();
+            const xml = fs.readFileSync(path, 'utf8');
+            parser.parseString(xml, (err, result) => {
+              if (err) throw err;
+              let summary = `### Appium Tests Summary\n\n`;
+              summary += `| Test | Status |\n| --- | --- |\n`;
+              const tests = result['testng-results']['suite'][0]['test'];
+              tests.forEach(test => {
+                const name = test['$']['name'];
+                const status = test['$']['passed'] === '1' ? 'passed' : 'failed';
+                summary += `| ${name} | ${status} |\n`;
+              });
+              github.actions.summary.addRaw(summary).write();
+            });
