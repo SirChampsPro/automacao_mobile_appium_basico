@@ -1,69 +1,76 @@
-name: Appium Mobile Tests
+name: Mobile Appium Tests
 
 on:
   push:
   pull_request:
 
 jobs:
-  appium-tests:
+  android-tests:
     runs-on: ubuntu-latest
+
+    env:
+      ANDROID_HOME: /home/runner/android-sdk
+      PATH: /home/runner/android-sdk/cmdline-tools/latest/bin:/home/runner/android-sdk/emulator:/home/runner/android-sdk/platform-tools:$PATH
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Java 11
+      - name: Setup JDK
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: 11
 
-      - name: Set Android environment variables
+      - name: Install Android SDK
         run: |
-          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/emulator:$HOME/android-sdk/platform-tools:$PATH" >> $GITHUB_ENV
+          mkdir -p $ANDROID_HOME
+          cd $ANDROID_HOME
+          curl -o sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip sdk-tools.zip -d cmdline-tools
+          rm sdk-tools.zip
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis;armeabi-v7a" "emulator"
 
-      - name: Install Android SDK Command-line Tools
+      - name: Create ARM AVD
         run: |
-          mkdir -p $ANDROID_HOME/cmdline-tools
-          curl -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
-          mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-          rm cmdline-tools.zip
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+            -n test -k "system-images;android-33;google_apis;armeabi-v7a" --force
 
-      - name: Accept SDK licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-
-      - name: Install SDK packages
+      - name: Start ARM Emulator
         run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis;x86_64"
-
-      - name: Create AVD
-        run: |
-          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n test -k "system-images;android-33;google_apis;x86_64" --force
-
-      - name: Start Emulator
-        run: |
-          $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio -gpu swiftshader_indirect &
+          $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio &
           adb wait-for-device
           adb shell input keyevent 82
 
-      - name: Run Appium tests via Maven
-        run: mvn clean test
+      - name: Install Maven dependencies
+        run: mvn clean install -DskipTests
+
+      - name: Run Appium tests
+        run: mvn test
 
       - name: Generate GitHub Actions summary
         if: always()
-        run: |
-          if [ -f target/surefire-reports/TEST-*.xml ]; then
-            echo "### Test Summary" >> $GITHUB_STEP_SUMMARY
-            grep '<testcase ' target/surefire-reports/TEST-*.xml | while read line; do
-              TEST_NAME=$(echo $line | sed -n 's/.*classname="\([^"]*\)".*/\1/p')
-              if [[ $line == *'failure'* ]]; then
-                STATUS="❌ Failed"
-              else
-                STATUS="✅ Passed"
-              fi
-              echo "| $TEST_NAME | $STATUS |" >> $GITHUB_STEP_SUMMARY
-            done
-          else
-            echo "No test reports found" >> $GITHUB_STEP_SUMMARY
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'target/surefire-reports/testng-results.xml';
+            if (!fs.existsSync(path)) {
+              console.log('Nenhum report XML encontrado, pulando summary.');
+              return;
+            }
+            const parse = require('fast-xml-parser');
+            const xmlData = fs.readFileSync(path, 'utf8');
+            const jsonObj = parse.parse(xmlData, { ignoreAttributes: false });
+            let summary = `### Appium Tests Summary\n\n`;
+            summary += `| Test | Status |\n| --- | --- |\n`;
+            const tests = jsonObj['testng-results']['suite']['test']['class'];
+            tests.forEach(c => {
+              const className = c['@_name'];
+              const methods = Array.isArray(c['test-method']) ? c['test-method'] : [c['test-method']];
+              methods.forEach(m => {
+                summary += `| ${className}.${m['@_name']} | ${m['@_status']} |\n`;
+              });
+            });
+            github.actions.summary.addRaw(summary).write();
