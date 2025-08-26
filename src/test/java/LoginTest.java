@@ -45,15 +45,16 @@ public class LoginTest {
 
         DesiredCapabilities capabilities = new DesiredCapabilities();
         capabilities.setCapability("platformName", "android");
-        capabilities.setCapability("appium:automationName", "uiAutomator2");
-        capabilities.setCapability("appium:deviceName", "d037c70");
+        capabilities.setCapability("appium:automationName", "UiAutomator2");
+        capabilities.setCapability("appium:deviceName", "Android Emulator"); // genérico
+        capabilities.setCapability("appium:platformVersion", "13.0"); // versão do emulador
         capabilities.setCapability("appium:ignoreHiddenApiPolicyError", true);
         capabilities.setCapability("appium:ensureWebviewsHavePages", true);
-        capabilities.setCapability("appium:newCommandTimeout", Optional.of(3600));
+        capabilities.setCapability("appium:newCommandTimeout", 3600);
         capabilities.setCapability("appium:connectHardwareKeyboard", true);
         capabilities.setCapability("appium:app", System.getProperty("user.dir") + "/apk/app.apk");
 
-        URL url = new URL("http://127.0.0.1:4723/");
+        URL url = new URL("http://127.0.0.1:4723/wd/hub"); // Appium server no runner
 
         driver = new AppiumDriver(url, capabilities);
     }
