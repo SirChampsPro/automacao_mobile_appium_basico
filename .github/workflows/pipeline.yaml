@@ -1,50 +1,61 @@
-name: Appium Mobile Tests
+name: Mobile Automation Tests
 
 on:
   push:
   pull_request:
 
 jobs:
-  android-tests:
+  android-appium-tests:
     runs-on: ubuntu-latest
 
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
-      PATH: /usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/tools:/usr/local/lib/android/sdk/tools/bin:/usr/local/lib/android/sdk/platform-tools:$PATH
+      PATH: /usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/tools:/usr/local/lib/android/sdk/tools/bin:/usr/local/lib/android/sdk/platform-tools:$PATH:$PATH
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup JDK and Maven
+      - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y unzip tar curl openjdk-11-jdk maven
+          sudo apt-get update
+          sudo apt-get install -y openjdk-11-jdk maven unzip tar curl
 
-      - name: Verify Java & Maven
+      - name: Show versions
         run: |
           java -version
+          javac -version
           mvn -version
+          adb version
 
-      - name: Setup Android SDK
-        run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "emulator"
-
-      - name: Build the project
-        run: mvn clean install
-
-      - name: Start Android Emulator
-        run: |
-          $ANDROID_HOME/emulator/emulator -avd test -no-snapshot-load -no-window -no-audio &
-          adb wait-for-device
-          adb shell input keyevent 82
+      - name: Build project with Maven
+        run: mvn clean install -B
 
       - name: Run Appium tests
-        run: mvn test -Dtest=**/*Test.java
+        run: mvn test
 
-      - name: Collect test reports
+      - name: Generate test summary
+        if: always()
+        run: |
+          REPORT_FILE="target/surefire-reports/TEST-*.xml"
+          if compgen -G "$REPORT_FILE" > /dev/null; then
+            echo "### Test Summary" >> $GITHUB_STEP_SUMMARY
+            for f in $REPORT_FILE; do
+              TEST_NAME=$(xmllint --xpath "string(//testsuite/@name)" "$f")
+              FAILURES=$(xmllint --xpath "string(//testsuite/@failures)" "$f")
+              ERRORS=$(xmllint --xpath "string(//testsuite/@errors)" "$f")
+              PASSED=$(xmllint --xpath "string(//testsuite/@tests)" "$f")
+              echo "- **$TEST_NAME** | Passed: $PASSED | Failures: $FAILURES | Errors: $ERRORS" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "No test reports found." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload test reports
         uses: actions/upload-artifact@v4
         with:
-          name: appium-reports
-          path: target/surefire-reports
+          name: appium-test-report
+          path: |
+            target/surefire-reports
+            target/screenshots
