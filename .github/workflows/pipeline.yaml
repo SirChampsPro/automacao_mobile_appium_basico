@@ -8,15 +8,11 @@ jobs:
   android-tests:
     runs-on: ubuntu-latest
 
-    env:
-      ANDROID_HOME: /home/runner/android-sdk
-      PATH: /home/runner/android-sdk/cmdline-tools/latest/bin:/home/runner/android-sdk/emulator:/home/runner/android-sdk/platform-tools:$PATH
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup JDK
+      - name: Setup JDK 11
         uses: actions/setup-java@v3
         with:
           distribution: temurin
@@ -24,30 +20,38 @@ jobs:
 
       - name: Install Android SDK
         run: |
-          mkdir -p $ANDROID_HOME
+          export ANDROID_HOME=$HOME/android-sdk
+          mkdir -p $ANDROID_HOME/cmdline-tools
           cd $ANDROID_HOME
-          curl -o sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip sdk-tools.zip -d cmdline-tools
-          rm sdk-tools.zip
+          curl -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip cmdline-tools.zip -d cmdline-tools
+          rm cmdline-tools.zip
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis;armeabi-v7a" "emulator"
+        shell: bash
 
       - name: Create ARM AVD
         run: |
+          export ANDROID_HOME=$HOME/android-sdk
           echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
             -n test -k "system-images;android-33;google_apis;armeabi-v7a" --force
+        shell: bash
 
       - name: Start ARM Emulator
         run: |
+          export ANDROID_HOME=$HOME/android-sdk
           $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio &
           adb wait-for-device
           adb shell input keyevent 82
+        shell: bash
 
       - name: Install Maven dependencies
         run: mvn clean install -DskipTests
+        shell: bash
 
       - name: Run Appium tests
         run: mvn test
+        shell: bash
 
       - name: Generate GitHub Actions summary
         if: always()
