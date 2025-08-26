@@ -1,44 +1,47 @@
-name: Android Appium Tests
+name: Java Appium Tests
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
-  android-emulator-tests:
+  appium-tests:
     runs-on: ubuntu-latest
+
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
-      PATH: ${{ env.ANDROID_HOME }}/emulator:${{ env.ANDROID_HOME }}/tools:${{ env.ANDROID_HOME }}/tools/bin:${{ env.ANDROID_HOME }}/platform-tools:$PATH
+      PATH: /usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/tools:/usr/local/lib/android/sdk/tools/bin:/usr/local/lib/android/sdk/platform-tools:$PATH
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up JDK 17
+      - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 11
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v2
+        with:
+          api-level: 33
+          target: default
+          arch: x86_64
+          build-tools: 33.0.2
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses
 
-      - name: Install required Android SDK packages
+      - name: Start Android Emulator
         run: |
-          sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis;x86_64" "emulator"
-
-      - name: Start Android emulator
-        run: |
-          echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-33;google_apis;x86_64" --force
-          nohup emulator -avd test_emulator -no-snapshot -no-audio -no-window -gpu swiftshader_indirect &
+          echo "Starting emulator..."
+          $ANDROID_HOME/emulator/emulator -avd testAVD -no-window -no-audio &
           adb wait-for-device
-          adb shell input keyevent 82 # unlock screen
-        shell: bash
+          adb shell input keyevent 82
 
-      - name: Build the app
-        run: ./gradlew assembleDebug
+      - name: Build project
+        run: ./gradlew clean build
 
       - name: Run Appium tests
         run: ./gradlew connectedAndroidTest
@@ -49,9 +52,17 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const reportPath = 'app/build/reports/androidTests/connected/flavors/debug/index.html';
+            const reportPath = 'app/build/reports/tests/testDebugUnitTest/testDebugUnitTest.json';
             if (!fs.existsSync(reportPath)) {
-              console.log('Nenhum relatório encontrado, pulando summary.');
+              console.log('Nenhum report encontrado, pulando summary.');
               return;
             }
-            github.actions.summary.addRaw(`### Android Appium Tests Summary\n[View Report](${reportPath})`).write();
+            const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+            let summary = `### Appium Tests Summary\n\n`;
+            summary += `| Test | Status |\n| --- | --- |\n`;
+            report.testsuites.testsuite.forEach(suite => {
+              suite.testcase.forEach(tc => {
+                summary += `| ${tc.name} | ${tc.status || 'unknown'} |\n`;
+              });
+            });
+            github.actions.summary.addRaw(summary).write();
