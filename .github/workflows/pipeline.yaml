@@ -1,80 +1,65 @@
-name: Mobile Appium Tests
+name: Mobile Automation Tests Appium
 
 on:
   push:
   pull_request:
 
 jobs:
-  android-tests:
+  appium-tests:
     runs-on: ubuntu-latest
+
+    env:
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
+      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+      PATH: ${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin:${{ github.workspace }}/android-sdk/platform-tools:${{ github.workspace }}/android-sdk/emulator:$PATH
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup JDK 11
+      - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: 11
 
-      - name: Install Android SDK
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y unzip curl wget
+
+      - name: Install Android SDK command line tools
         run: |
-          export ANDROID_HOME=$HOME/android-sdk
           mkdir -p $ANDROID_HOME/cmdline-tools
-          cd $ANDROID_HOME
+          cd $ANDROID_HOME/cmdline-tools
           curl -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip cmdline-tools.zip -d cmdline-tools
+          unzip cmdline-tools.zip
           rm cmdline-tools.zip
+          mv cmdline-tools latest
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis;armeabi-v7a" "emulator"
-        shell: bash
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis;x86_64" "emulator"
 
-      - name: Create ARM AVD
+      - name: Create Android Emulator
         run: |
-          export ANDROID_HOME=$HOME/android-sdk
-          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
-            -n test -k "system-images;android-33;google_apis;armeabi-v7a" --force
-        shell: bash
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n test -k "system-images;android-33;google_apis;x86_64" --device "pixel"
 
-      - name: Start ARM Emulator
+      - name: Start Emulator
         run: |
-          export ANDROID_HOME=$HOME/android-sdk
-          $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio &
+          $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio -gpu swiftshader_indirect &
           adb wait-for-device
           adb shell input keyevent 82
         shell: bash
 
-      - name: Install Maven dependencies
-        run: mvn clean install -DskipTests
+      - name: Build and Run Appium Tests
+        run: mvn clean test
+        working-directory: ./appium-tests
         shell: bash
 
-      - name: Run Appium tests
-        run: mvn test
-        shell: bash
-
-      - name: Generate GitHub Actions summary
+      - name: Stop Emulator
         if: always()
-        uses: actions/github-script@v6
+        run: adb -s emulator-5554 emu kill
+
+      - name: Upload Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const fs = require('fs');
-            const path = 'target/surefire-reports/testng-results.xml';
-            if (!fs.existsSync(path)) {
-              console.log('Nenhum report XML encontrado, pulando summary.');
-              return;
-            }
-            const parse = require('fast-xml-parser');
-            const xmlData = fs.readFileSync(path, 'utf8');
-            const jsonObj = parse.parse(xmlData, { ignoreAttributes: false });
-            let summary = `### Appium Tests Summary\n\n`;
-            summary += `| Test | Status |\n| --- | --- |\n`;
-            const tests = jsonObj['testng-results']['suite']['test']['class'];
-            tests.forEach(c => {
-              const className = c['@_name'];
-              const methods = Array.isArray(c['test-method']) ? c['test-method'] : [c['test-method']];
-              methods.forEach(m => {
-                summary += `| ${className}.${m['@_name']} | ${m['@_status']} |\n`;
-              });
-            });
-            github.actions.summary.addRaw(summary).write();
+          name: appium-reports
+          path: appium-tests/target/surefire-reports
