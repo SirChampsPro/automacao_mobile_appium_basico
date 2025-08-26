@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ANDROID_HOME: ${{ runner.temp }}/android-sdk
-      PATH: ${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin:${{ runner.temp }}/android-sdk/platform-tools:${{ runner.temp }}/android-sdk/emulator:$PATH
+      ANDROID_HOME: /home/runner/android-sdk
+      PATH: /home/runner/android-sdk/cmdline-tools/latest/bin:/home/runner/android-sdk/platform-tools:/home/runner/android-sdk/emulator:$PATH
 
     steps:
       - name: Checkout repository
@@ -23,7 +23,7 @@ jobs:
           java-version: '11'
           distribution: 'temurin'
 
-      - name: Install Maven
+      - name: Install Maven and dependencies
         run: sudo apt-get update && sudo apt-get install -y maven unzip wget
 
       - name: Install Android SDK command line tools
@@ -39,7 +39,6 @@ jobs:
       - name: Install required Android packages
         run: |
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "emulator" "platforms;android-33" "system-images;android-33;google_apis;x86_64"
-          echo "ANDROID_HOME set to $ANDROID_HOME"
 
       - name: Create and start Android emulator
         run: |
