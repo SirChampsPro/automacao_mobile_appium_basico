@@ -1,72 +1,50 @@
-name: Java + Appium Tests
+name: Appium Mobile Tests
 
 on:
   push:
   pull_request:
 
 jobs:
-  appium-tests:
+  android-tests:
     runs-on: ubuntu-latest
+
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       PATH: /usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/tools:/usr/local/lib/android/sdk/tools/bin:/usr/local/lib/android/sdk/platform-tools:$PATH
 
     steps:
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip tar curl openjdk-11-jdk maven
-
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '11'
+      - name: Setup JDK and Maven
+        run: |
+          apt-get update
+          apt-get install -y unzip tar curl openjdk-11-jdk maven
 
-      - name: Install Android SDK packages
+      - name: Verify Java & Maven
+        run: |
+          java -version
+          mvn -version
+
+      - name: Setup Android SDK
         run: |
           yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis;x86_64"
+          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "emulator"
 
-      - name: Create Android emulator
-        run: |
-          echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-33;google_apis;x86_64" --force
+      - name: Build the project
+        run: mvn clean install
 
-      - name: Start Android emulator
+      - name: Start Android Emulator
         run: |
-          $ANDROID_HOME/emulator/emulator -avd test_emulator -no-window -no-audio -no-snapshot &
+          $ANDROID_HOME/emulator/emulator -avd test -no-snapshot-load -no-window -no-audio &
           adb wait-for-device
           adb shell input keyevent 82
 
       - name: Run Appium tests
-        run: mvn clean test
+        run: mvn test -Dtest=**/*Test.java
 
-      - name: Generate GitHub Actions summary
-        if: always()
-        uses: actions/github-script@v6
+      - name: Collect test reports
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const fs = require('fs');
-            const path = 'target/surefire-reports/testng-results.xml';
-            if (!fs.existsSync(path)) {
-              console.log('Nenhum report XML encontrado, pulando summary.');
-              return;
-            }
-            const xml2js = require('xml2js');
-            const parser = new xml2js.Parser();
-            const xml = fs.readFileSync(path, 'utf8');
-            parser.parseString(xml, (err, result) => {
-              if (err) throw err;
-              let summary = `### Appium Tests Summary\n\n`;
-              summary += `| Test | Status |\n| --- | --- |\n`;
-              const tests = result['testng-results']['suite'][0]['test'];
-              tests.forEach(test => {
-                const name = test['$']['name'];
-                const status = test['$']['passed'] === '1' ? 'passed' : 'failed';
-                summary += `| ${name} | ${status} |\n`;
-              });
-              github.actions.summary.addRaw(summary).write();
-            });
+          name: appium-reports
+          path: target/surefire-reports
